@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         智能网页字体管理器 (站点精控版)
 // @namespace    http://tampermonkey.net/
-// @version      1.3
+// @version      1.4
 // @description  支持全局/站点独立字体、站点黑名单、图标自动保护，解决 Gemini 等网站乱码问题
 // @author       Doris
 // @license      MIT
@@ -29,43 +29,44 @@
     const isExcluded = blacklist.includes(currentHost);
     const hasSiteFont = siteFonts[currentHost];
 
-    // --- 核心逻辑：应用字体 ---
+// --- 核心优化：极致注入速度 ---
     function applyFont() {
-        const oldStyle = document.getElementById('doris-font-style');
-        if (oldStyle) oldStyle.remove();
+        if (!isGlobalEnabled || isExcluded || !activeFontData) return;
 
-        // 如果全局关闭，或者当前站点在黑名单中，则不执行
-        if (!isGlobalEnabled || isExcluded) return;
-
-        // 确定要使用的字体 (优先使用站点独立字体)
-        const activeFontData = hasSiteFont ? hasSiteFont.data : globalFont;
-        const activeFontName = hasSiteFont ? hasSiteFont.name : globalFontName;
-
-        if (!activeFontData) return;
-
-        const style = document.createElement('style');
-        style.id = 'doris-font-style';
-        style.textContent = `
+        // 1. 将 swap 改为 block：
+        // block 会在字体加载完成前隐藏文本（通常只有几十毫秒），避免视觉上的“跳动”
+        const styleText = `
             @font-face {
                 font-family: "${activeFontName}";
                 src: url("${activeFontData}");
-                font-display: swap;
+                font-display: block; 
             }
-            /* 保护逻辑：排除图标、代码、画布等 */
+            /* 预先隐藏 body，防止系统字体闪现，加载完立即显示 */
+            html { visibility: hidden; } 
+            
             *:not(i):not([class*="icon"]):not([class*="Icon"]):not([class*="material"]):not([class*="symbols"]):not([class*="fa-"]):not(svg):not(canvas):not(code):not(pre) {
                 font-family: "${activeFontName}", sans-serif !important;
             }
-            /* Gemini 专用图标修正 */
-            .material-symbols-outlined, .material-symbols-rounded, .material-symbols-sharp {
-                font-family: 'Material Symbols Outlined' !important;
-                font-style: normal !important;
-            }
+            
+            .material-symbols-outlined { font-family: 'Material Symbols Outlined' !important; }
         `;
+
+        const style = document.createElement('style');
+        style.id = 'doris-font-style';
+        style.textContent = styleText;
+
+        // 2. 抢占式注入：不要等 head，直接塞进 html 根节点
         document.documentElement.appendChild(style);
+
+        // 3. 强制显示：确保字体样式应用后立刻恢复网页可见
+        const fastShow = `html { visibility: visible !important; }`;
+        const showStyle = document.createElement('style');
+        showStyle.textContent = fastShow;
+        document.documentElement.appendChild(showStyle);
     }
 
+    // 立即执行，不等任何事件
     applyFont();
-
     // --- 注册油猴菜单 ---
 
     // 1. 全局开关
